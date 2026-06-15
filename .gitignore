@@ -1,0 +1,11 @@
+# Backend (Maven / Spring Boot)
+backend/target/
+
+# Frontend (Angular) — node_modules & dist are ignored by frontend/.gitignore too
+frontend/node_modules/
+frontend/dist/
+frontend/.angular/
+
+# OS / editor
+.DS_Store
+*.log

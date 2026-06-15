@@ -1,0 +1,87 @@
+<div class="app">
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">&lt;/&gt;</span>
+      <div>
+        <h1>Code&nbsp;&rarr;&nbsp;UML</h1>
+        <p class="tagline">Paste Java, get a class diagram</p>
+      </div>
+    </div>
+    <a class="repo-link" href="https://plantuml.com/class-diagram" target="_blank" rel="noopener">
+      Powered by JavaParser + PlantUML
+    </a>
+  </header>
+
+  <main class="panes">
+    <!-- Editor -->
+    <section class="pane editor-pane">
+      <div class="pane-head">
+        <span class="pane-title">Java source</span>
+        <button class="btn primary" (click)="generate()" [disabled]="loading()">
+          {{ loading() ? 'Generating…' : 'Generate UML ▸' }}
+        </button>
+      </div>
+      <app-code-editor
+        [value]="code()"
+        (valueChange)="code.set($event)"></app-code-editor>
+    </section>
+
+    <!-- Diagram -->
+    <section class="pane diagram-pane">
+      <div class="pane-head">
+        <span class="pane-title">Class diagram</span>
+        @if (rawSvg()) {
+          <div class="actions">
+            <button class="btn ghost" (click)="copyPuml()">{{ copied() ? 'Copied ✓' : 'Copy PlantUML' }}</button>
+            <button class="btn ghost" (click)="downloadPuml()">.puml</button>
+            <button class="btn ghost" (click)="downloadSvg()">.svg</button>
+          </div>
+        }
+      </div>
+
+      <div class="diagram-body">
+        @if (error()) {
+          <div class="callout error">{{ error() }}</div>
+        }
+        @for (w of warnings(); track w) {
+          <div class="callout warn">{{ w }}</div>
+        }
+
+        @if (loading()) {
+          <div class="placeholder">Rendering diagram…</div>
+        } @else if (svg()) {
+          <app-diagram-viewer [svg]="svg()"></app-diagram-viewer>
+        } @else if (!error()) {
+          <div class="placeholder">
+            <p>Your diagram will appear here.</p>
+            <p class="hint">Click <strong>Generate UML</strong> to try the sample on the left.</p>
+          </div>
+        }
+      </div>
+
+      @if (svg() && !loading()) {
+        <div class="info-panel">
+          @if (patterns().length) {
+            <div class="info-row">
+              <span class="info-label">Patterns</span>
+              @for (p of patterns(); track p.name + p.participants[0]) {
+                <span class="chip" [title]="p.note + '  •  ' + p.participants.join(', ')">
+                  {{ p.name }} <em>{{ p.participants[0] }}</em>
+                </span>
+              }
+            </div>
+          }
+          <div class="info-row legend">
+            <span class="info-label">Relations</span>
+            <span class="leg"><i>──▷</i> Inheritance</span>
+            <span class="leg"><i>┄┄▷</i> Realization</span>
+            <span class="leg"><i>◆──</i> Composition</span>
+            <span class="leg"><i>◇──</i> Aggregation</span>
+            <span class="leg"><i>──&gt;</i> Association</span>
+            <span class="leg"><i>┄┄&gt;</i> Dependency</span>
+          </div>
+        </div>
+      }
+    </section>
+  </main>
+</div>
