@@ -11,13 +11,11 @@ COPY package.json package-lock.json ./
 # Install dependencies (ci = clean install, respects lock file)
 RUN npm ci
 
-# Backend URL injected at build time
-# Pass via: docker build --build-arg BACKEND_URL=https://your-backend.up.railway.app
-ARG BACKEND_URL=http://localhost:8080
-
-# Copy source, replace placeholder, then build for production
+# Copy source and build for production
+# BACKEND_URL is NOT injected at build time — it is injected at runtime
+# by docker-entrypoint.sh using the BACKEND_URL environment variable.
+# This allows the same Docker Hub image to be used across all environments.
 COPY . .
-RUN sed -i "s|BACKEND_URL_PLACEHOLDER|${BACKEND_URL}|g" src/environments/environment.prod.ts
 RUN npm run build
 
 # ──────────────────────────────────────────────
@@ -32,12 +30,18 @@ LABEL description="code-to-uml Angular frontend"
 RUN rm -rf /usr/share/nginx/html/*
 
 # Copy built assets from the builder stage
-# Angular 21 (with @angular/build:application) outputs to dist/frontend/browser
+# Angular (with @angular/build:application) outputs to dist/frontend/browser
 COPY --from=builder /app/dist/frontend/browser /usr/share/nginx/html
 
 # Custom Nginx config to support Angular's client-side routing (HTML5 pushState)
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 
+# Runtime entrypoint: replaces BACKEND_URL_PLACEHOLDER in compiled JS
+# with the actual BACKEND_URL env var before Nginx starts
+COPY docker-entrypoint.sh /docker-app-entrypoint.sh
+RUN chmod +x /docker-app-entrypoint.sh
+
 EXPOSE 80
 
+ENTRYPOINT ["/docker-app-entrypoint.sh"]
 CMD ["nginx", "-g", "daemon off;"]
