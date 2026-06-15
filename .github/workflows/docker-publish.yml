@@ -1,0 +1,157 @@
+name: Build & Push Docker Images
+
+# ──────────────────────────────────────────────
+# Triggers
+# ──────────────────────────────────────────────
+on:
+  push:
+    branches:
+      - main
+      - master
+    tags:
+      - "v*.*.*"          # e.g. v1.0.0 → pushes a versioned tag too
+  pull_request:
+    branches:
+      - main
+      - master            # Build & test on PRs but do NOT push
+
+# ──────────────────────────────────────────────
+# Global env — change DOCKER_USERNAME if your
+# Docker Hub username differs from your GitHub one
+# ──────────────────────────────────────────────
+env:
+  DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+  BACKEND_IMAGE:  ${{ secrets.DOCKER_USERNAME }}/code-to-uml-backend
+  FRONTEND_IMAGE: ${{ secrets.DOCKER_USERNAME }}/code-to-uml-frontend
+
+jobs:
+  # ────────────────────────────────────────────
+  # Job 1 — Build & push the Spring Boot backend
+  # ────────────────────────────────────────────
+  build-backend:
+    name: 🛠️ Backend — Build & Push
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: ⬇️ Checkout repository
+        uses: actions/checkout@v4
+
+      # Enable multi-platform builds (linux/amd64 + linux/arm64)
+      - name: 🔧 Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: 🔧 Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Log in to Docker Hub only on push (not on PRs)
+      - name: 🔐 Log in to Docker Hub
+        if: github.event_name == 'push'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      # Derive smart image tags:
+      #   push to main/master  → :latest
+      #   push a tag v1.2.3    → :1.2.3 and :1.2 and :1
+      #   pull request          → :pr-<number> (not pushed)
+      - name: 🏷️ Extract metadata (tags & labels)
+        id: meta-backend
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.BACKEND_IMAGE }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix=sha-,format=short
+            type=ref,event=pr
+
+      - name: 🐳 Build & push backend image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          file: ./backend/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name == 'push' }}
+          tags: ${{ steps.meta-backend.outputs.tags }}
+          labels: ${{ steps.meta-backend.outputs.labels }}
+          # Cache layers in Docker Hub registry cache for faster rebuilds
+          cache-from: type=registry,ref=${{ env.BACKEND_IMAGE }}:cache
+          cache-to:   type=registry,ref=${{ env.BACKEND_IMAGE }}:cache,mode=max
+
+  # ────────────────────────────────────────────
+  # Job 2 — Build & push the Angular frontend
+  # ────────────────────────────────────────────
+  build-frontend:
+    name: 🎨 Frontend — Build & Push
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: ⬇️ Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 🔧 Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: 🔧 Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: 🔐 Log in to Docker Hub
+        if: github.event_name == 'push'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: 🏷️ Extract metadata (tags & labels)
+        id: meta-frontend
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.FRONTEND_IMAGE }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix=sha-,format=short
+            type=ref,event=pr
+
+      - name: 🐳 Build & push frontend image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./frontend
+          file: ./frontend/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name == 'push' }}
+          tags: ${{ steps.meta-frontend.outputs.tags }}
+          labels: ${{ steps.meta-frontend.outputs.labels }}
+          cache-from: type=registry,ref=${{ env.FRONTEND_IMAGE }}:cache
+          cache-to:   type=registry,ref=${{ env.FRONTEND_IMAGE }}:cache,mode=max
+
+  # ────────────────────────────────────────────
+  # Job 3 — Summary (runs after both jobs)
+  # ────────────────────────────────────────────
+  summary:
+    name: ✅ Publish Summary
+    runs-on: ubuntu-latest
+    needs: [build-backend, build-frontend]
+    if: github.event_name == 'push'
+
+    steps:
+      - name: 📋 Write job summary
+        run: |
+          echo "## 🐳 Docker Images Published" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Service  | Docker Hub Image |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|-----------------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Backend  | \`${{ env.BACKEND_IMAGE }}:latest\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Frontend | \`${{ env.FRONTEND_IMAGE }}:latest\` |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Triggered by:** \`${{ github.event_name }}\` on \`${{ github.ref_name }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Commit SHA:** \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
