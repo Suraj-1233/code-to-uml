@@ -11,8 +11,13 @@ COPY package.json package-lock.json ./
 # Install dependencies (ci = clean install, respects lock file)
 RUN npm ci
 
-# Copy source and build for production
+# Backend URL injected at build time
+# Pass via: docker build --build-arg BACKEND_URL=https://your-backend.up.railway.app
+ARG BACKEND_URL=http://localhost:8080
+
+# Copy source, replace placeholder, then build for production
 COPY . .
+RUN sed -i "s|BACKEND_URL_PLACEHOLDER|${BACKEND_URL}|g" src/environments/environment.prod.ts
 RUN npm run build
 
 # ──────────────────────────────────────────────
