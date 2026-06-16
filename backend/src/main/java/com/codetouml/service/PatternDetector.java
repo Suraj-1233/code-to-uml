@@ -12,6 +12,7 @@ import com.github.javaparser.ast.body.MethodDeclaration;
 import com.github.javaparser.ast.body.VariableDeclarator;
 import com.github.javaparser.ast.expr.MethodCallExpr;
 import com.github.javaparser.ast.expr.ObjectCreationExpr;
+import com.github.javaparser.ast.stmt.ReturnStmt;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -26,13 +27,14 @@ import java.util.Set;
  * Infers Gang-of-Four design patterns from the structure of the code.
  *
  * <p>This is deliberately heuristic — it looks for the tell-tale shape of each pattern
- * (e.g. a private constructor + static self-instance for Singleton). It favours precision
- * over recall, so it would rather miss a pattern than report a wrong one.
+ * (e.g. a private constructor + static self-instance for Singleton). Many GoF patterns are
+ * structurally identical and differ only by intent (Strategy / State / Command / Bridge are all
+ * "an abstraction + implementations + a holder"), so we lean on method/class naming and resolve
+ * them by precedence, claiming each abstraction once so it isn't reported under two names.
  *
- * <p>Several patterns share an identical structure (Strategy / State / Command / Bridge are all
- * "an abstraction + implementations + a holder"). Those can only be told apart by intent, so we
- * lean on method/class naming and resolve them by precedence, claiming each abstraction once so it
- * isn't reported under two names.
+ * <p>Detection aims to recognise textbook examples too, which are often minimal (a single
+ * implementation, no explicit context, no fields). Where structure alone is ambiguous we fall back
+ * to the conventional naming (e.g. a {@code *Facade}/{@code *Mediator}/{@code *Memento} class).
  */
 @Service
 public class PatternDetector {
@@ -67,11 +69,11 @@ public class PatternDetector {
             t.getImplementedTypes().forEach(s -> registerSubtype(subtypes, s.getNameAsString(), name, known));
         }
 
-        // Abstract factories are detected first so we don't also tag their concrete
-        // implementations as plain Factory Methods.
+        // Abstract factories are resolved first so their concrete implementations aren't also
+        // tagged as plain Factory Methods.
         Set<String> abstractFactoryTypes = new HashSet<>();
         for (ClassOrInterfaceDeclaration t : types) {
-            if (abstractFactory(t, abstractOrInterface) != null) {
+            if (abstractFactory(t, abstractOrInterface, subtypes, byName) != null) {
                 abstractFactoryTypes.add(t.getNameAsString());
             }
         }
@@ -83,23 +85,25 @@ public class PatternDetector {
             addIfPresent(found, singleton(t));
             addIfPresent(found, builder(t));
             addIfPresent(found, prototype(t));
-            addIfPresent(found, adapter(t, known, abstractOrInterface));
+            addIfPresent(found, adapter(t, known, abstractOrInterface, subtypes));
             addIfPresent(found, templateMethod(t));
             addIfPresent(found, iterator(t));
             addIfPresent(found, facade(t, known));
             addIfPresent(found, flyweight(t, known));
-            addIfPresent(found, memento(t, known));
             addIfPresent(found, mediator(t));
             addIfPresent(found, observer(t, abstractOrInterface));
             addIfPresent(found, bridge(t, subtypes, abstractOrInterface));
 
-            DetectedPattern af = abstractFactory(t, abstractOrInterface);
+            DetectedPattern af = abstractFactory(t, abstractOrInterface, subtypes, byName);
             if (af != null) {
                 found.add(af);
             } else if (!implementsAny(t, abstractFactoryTypes)) {
                 addIfPresent(found, factoryMethod(t, subtypes, abstractOrInterface));
             }
         }
+
+        // Memento needs to see the whole file (originator + snapshot), so it's a single pass.
+        found.addAll(mementos(types, known));
 
         // 2) Abstractions already explained above must not be re-reported as Strategy/State/etc.
         Set<String> claimed = new HashSet<>();
@@ -127,7 +131,7 @@ public class PatternDetector {
         Set<String> off = new HashSet<>(behavioural);
         off.addAll(claimed);
         for (ClassOrInterfaceDeclaration t : types) {
-            addIfPresent(found, wrapping(t, off));
+            addIfPresent(found, wrapping(t, off, subtypes));
         }
 
         return found;
@@ -203,7 +207,15 @@ public class PatternDetector {
         return null;
     }
 
-    private DetectedPattern abstractFactory(ClassOrInterfaceDeclaration t, Set<String> abstractOrInterface) {
+    /**
+     * Abstract Factory: an interface/abstract factory type whose method(s) return abstract products
+     * and whose concrete implementations instantiate those products. Two or more product methods
+     * also qualify on their own (a product family). A concrete factory class with no factory
+     * abstraction is a {@link #factoryMethod}, not an Abstract Factory.
+     */
+    private DetectedPattern abstractFactory(ClassOrInterfaceDeclaration t, Set<String> abstractOrInterface,
+                                            Map<String, Set<String>> subtypes,
+                                            Map<String, ClassOrInterfaceDeclaration> byName) {
         boolean isAbstraction = t.isInterface() || hasModifier(t.getModifiers(), Modifier.Keyword.ABSTRACT);
         if (!isAbstraction) {
             return null;
@@ -216,12 +228,27 @@ public class PatternDetector {
                 products.add(ret);
             }
         }
-        if (products.size() >= 2) {
+        if (products.isEmpty()) {
+            return null;
+        }
+        Set<String> producible = new HashSet<>();
+        for (String pr : products) {
+            producible.addAll(subtypes.getOrDefault(pr, Set.of()));
+        }
+        boolean implCreatesProduct = false;
+        for (String implName : subtypes.getOrDefault(name, Set.of())) {
+            ClassOrInterfaceDeclaration impl = byName.get(implName);
+            if (impl != null && impl.findAll(ObjectCreationExpr.class).stream()
+                    .map(o -> o.getType().getNameAsString()).anyMatch(producible::contains)) {
+                implCreatesProduct = true;
+            }
+        }
+        if (implCreatesProduct || products.size() >= 2) {
             List<String> participants = new ArrayList<>();
             participants.add(name);
             participants.addAll(products);
             return new DetectedPattern("Abstract Factory", participants,
-                    name + " declares factory methods for a family of products: " + String.join(", ", products) + ".");
+                    name + " is an abstract factory for product(s): " + String.join(", ", products) + ".");
         }
         return null;
     }
@@ -249,7 +276,7 @@ public class PatternDetector {
     // --- structural ----------------------------------------------------------
 
     private DetectedPattern adapter(ClassOrInterfaceDeclaration t, Set<String> known,
-                                    Set<String> abstractOrInterface) {
+                                    Set<String> abstractOrInterface, Map<String, Set<String>> subtypes) {
         if (t.isInterface() || hasModifier(t.getModifiers(), Modifier.Keyword.ABSTRACT)) {
             return null;
         }
@@ -263,8 +290,11 @@ public class PatternDetector {
         for (FieldDeclaration f : t.getFields()) {
             for (VariableDeclarator v : f.getVariables()) {
                 String simple = simpleType(v.getType().asString());
-                if (known.contains(simple) && !abstractOrInterface.contains(simple)
-                        && !targets.contains(simple) && !isCollection(v.getType().asString())) {
+                // An adaptee that already implements the target is a Proxy/Decorator, not an Adapter.
+                boolean implementsTarget = targets.stream()
+                        .anyMatch(tg -> subtypes.getOrDefault(tg, Set.of()).contains(simple));
+                if (known.contains(simple) && !abstractOrInterface.contains(simple) && !targets.contains(simple)
+                        && !implementsTarget && !isCollection(v.getType().asString())) {
                     adaptee = simple;
                     adapteeField = v.getNameAsString();
                 }
@@ -332,12 +362,14 @@ public class PatternDetector {
         }
         boolean named = name.toLowerCase().endsWith("facade");
         boolean plain = t.getImplementedTypes().isEmpty() && t.getExtendedTypes().isEmpty();
-        if ((named && subsystems.size() >= 2) || (plain && subsystems.size() >= 3)) {
+        if (named || (plain && subsystems.size() >= 3)) {
             List<String> participants = new ArrayList<>();
             participants.add(name);
             participants.addAll(subsystems);
-            return new DetectedPattern("Facade", participants,
-                    name + " wraps " + subsystems.size() + " subsystems behind a simpler API.");
+            String note = subsystems.isEmpty()
+                    ? name + " presents a single simplified entry point over several subsystems."
+                    : name + " wraps " + subsystems.size() + " subsystems behind a simpler API.";
+            return new DetectedPattern("Facade", participants, note);
         }
         return null;
     }
@@ -379,7 +411,8 @@ public class PatternDetector {
     }
 
     /** Composite / Decorator / Proxy / Chain of Responsibility — a class that wraps its own abstraction. */
-    private DetectedPattern wrapping(ClassOrInterfaceDeclaration t, Set<String> excluded) {
+    private DetectedPattern wrapping(ClassOrInterfaceDeclaration t, Set<String> excluded,
+                                     Map<String, Set<String>> subtypes) {
         if (t.isInterface()) {
             return null;
         }
@@ -398,8 +431,7 @@ public class PatternDetector {
             }
             for (VariableDeclarator v : f.getVariables()) {
                 String fieldType = v.getType().asString();
-                List<String> toks = tokens(fieldType);
-                String match = own.stream().filter(toks::contains).findFirst().orElse(null);
+                String match = wrappedAbstraction(own, fieldType, subtypes);
                 if (match == null) {
                     continue;
                 }
@@ -428,6 +460,22 @@ public class PatternDetector {
             }
             return new DetectedPattern("Decorator", List.of(name, held),
                     name + " implements " + held + " and wraps one to add behaviour.");
+        }
+        return null;
+    }
+
+    /** Returns the abstraction a field wraps: the field's type if it is (or implements) one of {@code own}. */
+    private String wrappedAbstraction(Set<String> own, String fieldType, Map<String, Set<String>> subtypes) {
+        List<String> toks = tokens(fieldType);
+        String direct = own.stream().filter(toks::contains).findFirst().orElse(null);
+        if (direct != null) {
+            return direct;
+        }
+        String simple = simpleType(fieldType);
+        for (String o : own) {
+            if (subtypes.getOrDefault(o, Set.of()).contains(simple)) {
+                return o; // field holds a concrete implementation of one of our own interfaces
+            }
         }
         return null;
     }
@@ -514,28 +562,48 @@ public class PatternDetector {
         return null;
     }
 
-    private DetectedPattern memento(ClassOrInterfaceDeclaration t, Set<String> known) {
-        if (t.isInterface()) {
-            return null;
+    /** Memento — an originator with save/restore, or, failing that, a {@code *Memento} snapshot class. */
+    private List<DetectedPattern> mementos(List<ClassOrInterfaceDeclaration> types, Set<String> known) {
+        List<DetectedPattern> result = new ArrayList<>();
+        Set<String> coveredSnapshots = new HashSet<>();
+        Set<String> originators = new HashSet<>();
+        for (ClassOrInterfaceDeclaration t : types) {
+            if (t.isInterface()) {
+                continue;
+            }
+            MethodDeclaration saver = t.getMethods().stream().filter(m -> {
+                String n = m.getNameAsString().toLowerCase();
+                return n.startsWith("save") || n.startsWith("creatememento") || n.startsWith("tomemento")
+                        || n.startsWith("snapshot");
+            }).findFirst().orElse(null);
+            MethodDeclaration restorer = t.getMethods().stream().filter(m -> {
+                String n = m.getNameAsString().toLowerCase();
+                return n.startsWith("restore") || n.startsWith("setmemento") || n.startsWith("frommemento");
+            }).findFirst().orElse(null);
+            if (saver != null && restorer != null) {
+                String memento = simpleType(saver.getType().asString());
+                originators.add(t.getNameAsString());
+                if (known.contains(memento)) {
+                    coveredSnapshots.add(memento);
+                    result.add(new DetectedPattern("Memento", List.of(t.getNameAsString(), memento),
+                            t.getNameAsString() + " captures and restores its state via "
+                                    + saver.getNameAsString() + "()/" + restorer.getNameAsString() + "()."));
+                } else {
+                    result.add(new DetectedPattern("Memento", List.of(t.getNameAsString()),
+                            t.getNameAsString() + " saves and restores its own state."));
+                }
+            }
         }
-        String name = t.getNameAsString();
-        MethodDeclaration saver = t.getMethods().stream().filter(m -> {
-            String n = m.getNameAsString().toLowerCase();
-            return n.startsWith("save") || n.startsWith("creatememento") || n.startsWith("tomemento")
-                    || n.startsWith("snapshot");
-        }).findFirst().orElse(null);
-        MethodDeclaration restorer = t.getMethods().stream().filter(m -> {
-            String n = m.getNameAsString().toLowerCase();
-            return n.startsWith("restore") || n.startsWith("setmemento") || n.startsWith("frommemento");
-        }).findFirst().orElse(null);
-        if (saver != null && restorer != null) {
-            String memento = simpleType(saver.getType().asString());
-            List<String> participants = known.contains(memento) ? List.of(name, memento) : List.of(name);
-            return new DetectedPattern("Memento", participants,
-                    name + " captures and restores its state via " + saver.getNameAsString()
-                            + "()/" + restorer.getNameAsString() + "().");
+        // Snapshot classes named *Memento that no detected originator already referenced.
+        for (ClassOrInterfaceDeclaration t : types) {
+            String name = t.getNameAsString();
+            if (!t.isInterface() && name.toLowerCase().endsWith("memento")
+                    && !coveredSnapshots.contains(name) && !originators.contains(name)) {
+                result.add(new DetectedPattern("Memento", List.of(name),
+                        name + " is a snapshot object that captures another object's state."));
+            }
         }
-        return null;
+        return result;
     }
 
     private DetectedPattern mediator(ClassOrInterfaceDeclaration t) {
@@ -551,8 +619,10 @@ public class PatternDetector {
     }
 
     /**
-     * The behavioural family that all share the shape "abstraction + 2 implementations + a holder":
+     * The behavioural family that all share the shape "abstraction + implementations + a holder":
      * Visitor, Command, Interpreter, State, Strategy. Resolved by precedence, one label per abstraction.
+     * The naming-driven members (Visitor/Command/Interpreter, and {@code *State}/{@code *Strategy}) are
+     * recognised even with a single implementation, since textbook examples are often minimal.
      */
     private List<DetectedPattern> behaviouralHierarchy(List<ClassOrInterfaceDeclaration> types,
                                                        Map<String, ClassOrInterfaceDeclaration> byName,
@@ -570,21 +640,21 @@ public class PatternDetector {
             }
             Set<String> impls = subtypes.getOrDefault(iface, Set.of());
 
-            // Visitor — visit(...) operations + elements that accept(visitor). Naming is strong here.
+            // Visitor — visit(...) operations + elements that accept(visitor).
             if (methodPrefix(decl, "visit") && anyAcceptsVisitor(types, iface)) {
                 result.add(new DetectedPattern("Visitor", withImpls(iface, impls),
                         iface + " declares visit(...) operations; elements call accept(" + iface + ")."));
                 behaviouralOut.add(iface);
                 continue;
             }
-            if (impls.size() < 2) {
+            if (impls.isEmpty()) {
                 continue;
             }
             // Command — an action object with execute()/undo().
             if (methodExact(decl, "execute", "undo")) {
                 result.add(new DetectedPattern("Command", withImpls(iface, impls),
                         iface + " wraps an action as an object (execute()/undo()) with "
-                                + impls.size() + " commands."));
+                                + impls.size() + " command(s)."));
                 behaviouralOut.add(iface);
                 continue;
             }
@@ -595,18 +665,17 @@ public class PatternDetector {
                 behaviouralOut.add(iface);
                 continue;
             }
-            // State — same shape as Strategy, told apart by *State naming + a context that swaps it.
+            // State — same shape as Strategy, told apart by *State naming; a context that swaps it is a bonus.
             DetectedPattern st = state(iface, impls, types);
             if (st != null) {
                 result.add(st);
                 behaviouralOut.add(iface);
                 continue;
             }
-            // Strategy — a context that holds one swappable implementation.
-            String ctx = contextHolding(iface, impls, types);
-            if (ctx != null) {
-                result.add(new DetectedPattern("Strategy", withImpls(iface, impls),
-                        ctx + " holds a " + iface + " and swaps between " + impls.size() + " implementations."));
+            // Strategy — a context holding one swappable implementation, or a *Strategy-named abstraction.
+            DetectedPattern str = strategy(iface, impls, types);
+            if (str != null) {
+                result.add(str);
                 behaviouralOut.add(iface);
             }
         }
@@ -616,7 +685,9 @@ public class PatternDetector {
     private DetectedPattern state(String stateType, Set<String> impls, List<ClassOrInterfaceDeclaration> types) {
         boolean named = stateType.toLowerCase().endsWith("state")
                 || impls.stream().filter(s -> s.toLowerCase().endsWith("state")).count() * 2 >= impls.size();
-        if (!named) {
+        boolean transitions = hasStateTransition(impls, types);
+        if (!named && !transitions) {
+            // Without *State naming or an actual transition it's indistinguishable from Strategy.
             return null;
         }
         String context = null;
@@ -634,29 +705,84 @@ public class PatternDetector {
                 break;
             }
         }
-        if (context == null) {
-            return null;
-        }
         List<String> participants = new ArrayList<>();
-        participants.add(context);
+        if (context != null) {
+            participants.add(context);
+        }
         participants.add(stateType);
         participants.addAll(impls);
-        return new DetectedPattern("State", distinct(participants),
-                context + " holds a " + stateType + " and switches between " + impls.size()
-                        + " concrete states at runtime.");
+        String note;
+        if (transitions) {
+            note = (context != null ? context + " drives a " + stateType : stateType)
+                    + " whose " + impls.size() + " states transition between one another at runtime.";
+        } else if (context != null) {
+            note = context + " holds a " + stateType + " and switches between " + impls.size()
+                    + " concrete states at runtime.";
+        } else {
+            note = stateType + " models " + impls.size() + " interchangeable state(s).";
+        }
+        return new DetectedPattern("State", distinct(participants), note);
     }
 
-    private String contextHolding(String iface, Set<String> impls, List<ClassOrInterfaceDeclaration> types) {
+    /**
+     * Detects a real state transition: an implementation that creates a <em>sibling</em> implementation
+     * and either returns it as the next state or hands it to a state-changing setter. This is the
+     * behavioural signature that tells State apart from Strategy without relying on naming. Building a
+     * sibling into a collection (e.g. {@code list.add(new Leaf())}) is a Composite, not a transition.
+     */
+    private boolean hasStateTransition(Set<String> impls, List<ClassOrInterfaceDeclaration> types) {
+        for (ClassOrInterfaceDeclaration t : types) {
+            if (!impls.contains(t.getNameAsString())) {
+                continue;
+            }
+            for (ObjectCreationExpr o : t.findAll(ObjectCreationExpr.class)) {
+                String created = o.getType().getNameAsString();
+                if (!impls.contains(created) || created.equals(t.getNameAsString())) {
+                    continue;
+                }
+                boolean returnedAsNext = o.getParentNode().map(p -> p instanceof ReturnStmt).orElse(false);
+                boolean handedToSetter = o.getParentNode()
+                        .map(p -> p instanceof MethodCallExpr m && isStateChange(m.getNameAsString()))
+                        .orElse(false);
+                if (returnedAsNext || handedToSetter) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private boolean isStateChange(String name) {
+        String l = name.toLowerCase();
+        return l.startsWith("set") || l.equals("transition") || l.equals("transitionto")
+                || l.equals("changestate") || l.equals("goto") || l.equals("moveto") || l.equals("advance");
+    }
+
+    private DetectedPattern strategy(String iface, Set<String> impls, List<ClassOrInterfaceDeclaration> types) {
+        String context = null;
         for (ClassOrInterfaceDeclaration t : types) {
             String name = t.getNameAsString();
             if (name.equals(iface) || impls.contains(name)) {
                 continue;
             }
             if (singleFieldOfType(t, iface)) {
-                return name;
+                context = name;
+                break;
             }
         }
-        return null;
+        boolean named = iface.toLowerCase().endsWith("strategy");
+        // A context that holds the abstraction only implies Strategy when there are 2+ interchangeable
+        // implementations to swap between (otherwise it's just a held collaborator, e.g. an Adapter
+        // target injected into a class). The *Strategy name is trusted on its own.
+        boolean contextual = context != null && impls.size() >= 2;
+        if (!contextual && !(named && !impls.isEmpty())) {
+            return null;
+        }
+        List<String> participants = withImpls(iface, impls);
+        String note = contextual
+                ? context + " holds a " + iface + " and swaps between " + impls.size() + " implementation(s)."
+                : iface + " defines " + impls.size() + " interchangeable algorithm(s).";
+        return new DetectedPattern("Strategy", participants, note);
     }
 
     // --- helpers -------------------------------------------------------------

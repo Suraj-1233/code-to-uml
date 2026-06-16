@@ -52,9 +52,13 @@ What it extracts:
     Observer, State, Strategy, Template Method, Visitor
 
   Several patterns are structurally identical and differ only by intent (Strategy / State / Command /
-  Bridge are all "an abstraction + implementations + a holder"). Those are resolved by precedence and
-  by method/class naming (e.g. `*State` ⇒ State, `execute()`/`undo()` ⇒ Command, `*Adapter`/`*Proxy`/
-  `*Facade`/`*Mediator` naming). Each abstraction is *claimed* once, so it is never double-reported —
+  Bridge are all "an abstraction + implementations + a holder"). Those are resolved by precedence,
+  by deeper analysis of method bodies, and — only where structure is genuinely ambiguous — by naming.
+  For example **State** is recognised without any naming when an implementation performs a real
+  *transition* (creates a sibling state and returns it or hands it to a state-changing setter, as
+  opposed to `list.add(new Leaf())` which is a Composite); it also falls back to the `*State` name for
+  minimal stubs. Other naming signals: `execute()`/`undo()` ⇒ Command, `interpret()` ⇒ Interpreter,
+  `*Adapter`/`*Proxy`/`*Facade`/`*Mediator`/`*Memento`. Each abstraction is *claimed* once, so it is never double-reported —
   e.g. an interface already explained as a Factory product, Observer subject or Bridge implementor is
   not also tagged Strategy. Detection favours precision over recall: it would rather miss a pattern
   than invent one, so the naming-driven ones (Mediator, Memento, Flyweight, Interpreter) need the
