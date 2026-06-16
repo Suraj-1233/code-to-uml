@@ -23,9 +23,25 @@ public class PlantUmlGenerator {
         // Smetana = pure-Java layout, so no Graphviz/dot binary is required.
         sb.append("!pragma layout smetana\n");
         sb.append("skinparam dpi 96\n");
-        sb.append("skinparam classAttributeIconSize 0\n");
+        sb.append("skinparam backgroundColor #FAFBFC\n");
         sb.append("skinparam shadowing false\n");
-        sb.append("skinparam roundCorner 8\n");
+        sb.append("skinparam roundCorner 12\n");
+        sb.append("skinparam classAttributeIconSize 0\n");
+        sb.append("skinparam defaultFontName SansSerif\n");
+        sb.append("skinparam defaultFontSize 13\n");
+        sb.append("skinparam linetype ortho\n");
+        sb.append("skinparam nodesep 45\n");
+        sb.append("skinparam ranksep 70\n");
+        sb.append("skinparam class {\n");
+        sb.append("  FontStyle bold\n");
+        sb.append("  FontColor #0F172A\n");
+        sb.append("  AttributeFontColor #334155\n");
+        sb.append("  AttributeFontSize 12\n");
+        sb.append("  StereotypeFontColor #6D28D9\n");
+        sb.append("}\n");
+        sb.append("skinparam ArrowThickness 1.3\n");
+        sb.append("skinparam ArrowFontColor #475569\n");
+        sb.append("skinparam ArrowFontSize 12\n");
         sb.append("hide empty members\n\n");
 
         Map<String, List<String>> stereotypes = stereotypesByType(result.patterns());
@@ -35,6 +51,7 @@ public class PlantUmlGenerator {
             for (String stereotype : stereotypes.getOrDefault(c.name(), List.of())) {
                 sb.append(" <<").append(stereotype).append(">>");
             }
+            sb.append(' ').append(colorFor(c.kind()));
             sb.append(" {\n");
             for (UmlField f : c.fields()) {
                 sb.append("  ").append(f.visibility()).append(' ');
@@ -94,15 +111,26 @@ public class PlantUmlGenerator {
         };
     }
 
-    /** PlantUML arrow for each relationship type (diamond ends sit on the owning class). */
+    /** A distinct background + border colour per element kind, so the diagram reads at a glance. */
+    private String colorFor(String kind) {
+        return switch (kind) {
+            case "interface" -> "#DBEAFE ##2563EB";   // blue
+            case "enum" -> "#FFEDD5 ##EA580C";        // amber
+            case "abstract" -> "#EDE9FE ##7C3AED";    // violet
+            case "annotation" -> "#FEF9C3 ##CA8A04";  // yellow
+            default -> "#ECFDF5 ##10B981";            // green (concrete class)
+        };
+    }
+
+    /** PlantUML arrow for each relationship type, colour-coded (diamond ends sit on the owning class). */
     private String arrowFor(String type) {
         return switch (type) {
-            case "extends" -> "--|>";      // generalization (inheritance)
-            case "implements" -> "..|>";   // realization
-            case "composition" -> "*--";   // filled diamond
-            case "aggregation" -> "o--";   // hollow diamond
-            case "association" -> "-->";
-            case "dependency" -> "..>";    // dashed
+            case "extends" -> "-[#1E88E5]-|>";          // generalization — blue
+            case "implements" -> "-[#1E88E5,dashed]-|>"; // realization — dashed blue
+            case "composition" -> "*-[#E53935]-";        // filled diamond — red
+            case "aggregation" -> "o-[#FB8C00]-";        // hollow diamond — orange
+            case "association" -> "-[#546E7A]->";        // slate
+            case "dependency" -> "-[#90A4AE,dashed]->";  // dashed grey
             default -> null;
         };
     }

@@ -236,6 +236,15 @@
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   margin-right: 3px;
 }
+.legend .leg .sw {
+  display: inline-block;
+  width: 11px;
+  height: 11px;
+  border-radius: 3px;
+  border: 1.5px solid;
+  vertical-align: -1px;
+  margin-right: 3px;
+}
 
 /* Responsive */
 @media (max-width: 820px) {
