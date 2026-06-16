@@ -44,8 +44,22 @@ What it extracts:
   - a collection field, or one injected via the constructor → **aggregation** (hollow diamond, with `*` multiplicity)
   - a plain field reference → **association**
   - a type used only in a method/constructor signature → **dependency** (dashed)
-- **Design patterns** (best-effort, structural heuristics): **Singleton, Strategy, Factory,
-  Builder, Observer** — shown as `«stereotype»` labels on the diagram and a patterns panel in the UI
+- **Design patterns** — all **23 Gang-of-Four** patterns, detected with structural heuristics and
+  shown as `«stereotype»` labels on the diagram plus a patterns panel in the UI:
+  - *Creational:* Singleton, Factory Method, Abstract Factory, Builder, Prototype
+  - *Structural:* Adapter, Bridge, Composite, Decorator, Facade, Flyweight, Proxy
+  - *Behavioral:* Chain of Responsibility, Command, Interpreter, Iterator, Mediator, Memento,
+    Observer, State, Strategy, Template Method, Visitor
+
+  Several patterns are structurally identical and differ only by intent (Strategy / State / Command /
+  Bridge are all "an abstraction + implementations + a holder"). Those are resolved by precedence and
+  by method/class naming (e.g. `*State` ⇒ State, `execute()`/`undo()` ⇒ Command, `*Adapter`/`*Proxy`/
+  `*Facade`/`*Mediator` naming). Each abstraction is *claimed* once, so it is never double-reported —
+  e.g. an interface already explained as a Factory product, Observer subject or Bridge implementor is
+  not also tagged Strategy. Detection favours precision over recall: it would rather miss a pattern
+  than invent one, so the naming-driven ones (Mediator, Memento, Flyweight, Interpreter) need the
+  conventional names to be recognised. Verified on a sample that exercises all 23 (23/23, no false
+  positives).
 
 ---
 
