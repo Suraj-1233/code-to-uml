@@ -6,7 +6,9 @@ import com.codetouml.model.UmlClass;
 import com.codetouml.model.UmlField;
 import com.codetouml.model.UmlMethod;
 import com.codetouml.model.UmlRelation;
-import com.github.javaparser.StaticJavaParser;
+import com.github.javaparser.JavaParser;
+import com.github.javaparser.ParseProblemException;
+import com.github.javaparser.ParserConfiguration;
 import com.github.javaparser.ast.CompilationUnit;
 import com.github.javaparser.ast.Modifier;
 import com.github.javaparser.ast.NodeList;
@@ -17,6 +19,7 @@ import com.github.javaparser.ast.body.EnumDeclaration;
 import com.github.javaparser.ast.body.FieldDeclaration;
 import com.github.javaparser.ast.body.MethodDeclaration;
 import com.github.javaparser.ast.body.Parameter;
+import com.github.javaparser.ast.body.RecordDeclaration;
 import com.github.javaparser.ast.body.VariableDeclarator;
 import com.github.javaparser.ast.expr.AssignExpr;
 import com.github.javaparser.ast.expr.Expression;
@@ -49,7 +52,13 @@ public class JavaCodeParser {
     }
 
     public ParseResult parse(String code) {
-        CompilationUnit cu = StaticJavaParser.parse(code);
+        // Java 17 (LTS) language level so modern syntax (records, sealed types, text blocks,
+        // instanceof patterns, …) parses instead of failing the whole file.
+        JavaParser javaParser = new JavaParser(new ParserConfiguration()
+                .setLanguageLevel(ParserConfiguration.LanguageLevel.JAVA_17));
+        com.github.javaparser.ParseResult<CompilationUnit> parsed = javaParser.parse(code);
+        CompilationUnit cu = parsed.getResult()
+                .orElseThrow(() -> new ParseProblemException(parsed.getProblems()));
 
         List<UmlClass> classes = new ArrayList<>();
 
@@ -79,6 +88,23 @@ public class JavaCodeParser {
             classes.add(new UmlClass(
                     decl.getNameAsString(),
                     "enum",
+                    fields,
+                    methodsOf(decl.getMethods(), false),
+                    new ArrayList<>(),
+                    names(decl.getImplementedTypes())
+            ));
+        }
+
+        // Records (Java 16+). The header components are the canonical fields.
+        for (RecordDeclaration decl : cu.findAll(RecordDeclaration.class)) {
+            List<UmlField> fields = new ArrayList<>();
+            for (Parameter component : decl.getParameters()) {
+                fields.add(new UmlField("+", component.getNameAsString(), component.getType().asString(), false));
+            }
+            fields.addAll(fieldsOf(decl.getFields(), false));
+            classes.add(new UmlClass(
+                    decl.getNameAsString(),
+                    "record",
                     fields,
                     methodsOf(decl.getMethods(), false),
                     new ArrayList<>(),
@@ -178,6 +204,51 @@ public class JavaCodeParser {
             }
             for (ConstructorDeclaration ctor : decl.getConstructors()) {
                 for (Parameter p : ctor.getParameters()) {
+                    used.addAll(referencedKnown(p.getType().asString(), known, owner));
+                }
+            }
+            for (String target : used) {
+                if (!fieldTargets.contains(target)) {
+                    candidates.add(new RelCandidate(owner, target, "dependency", null, null, 1));
+                }
+            }
+        }
+
+        // Records: components (and body fields) are references the record holds; methods give dependencies.
+        for (RecordDeclaration decl : cu.findAll(RecordDeclaration.class)) {
+            String owner = decl.getNameAsString();
+            for (ClassOrInterfaceType t : decl.getImplementedTypes()) {
+                if (known.contains(t.getNameAsString())) {
+                    candidates.add(new RelCandidate(owner, t.getNameAsString(), "implements", null, null, 5));
+                }
+            }
+            Set<String> fieldTargets = new HashSet<>();
+            for (Parameter component : decl.getParameters()) {
+                String vType = component.getType().asString();
+                boolean collection = isCollection(vType);
+                for (String target : referencedKnown(vType, known, owner)) {
+                    fieldTargets.add(target);
+                    String type = collection ? "aggregation" : "association";
+                    candidates.add(new RelCandidate(owner, target, type, component.getNameAsString(),
+                            collection ? "*" : null, priorityOf(type)));
+                }
+            }
+            for (FieldDeclaration f : decl.getFields()) {
+                for (VariableDeclarator v : f.getVariables()) {
+                    String vType = v.getType().asString();
+                    boolean collection = isCollection(vType);
+                    for (String target : referencedKnown(vType, known, owner)) {
+                        fieldTargets.add(target);
+                        String type = collection ? "aggregation" : "association";
+                        candidates.add(new RelCandidate(owner, target, type, v.getNameAsString(),
+                                collection ? "*" : null, priorityOf(type)));
+                    }
+                }
+            }
+            Set<String> used = new LinkedHashSet<>();
+            for (MethodDeclaration m : decl.getMethods()) {
+                used.addAll(referencedKnown(m.getType().asString(), known, owner));
+                for (Parameter p : m.getParameters()) {
                     used.addAll(referencedKnown(p.getType().asString(), known, owner));
                 }
             }

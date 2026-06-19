@@ -48,6 +48,9 @@ public class PlantUmlGenerator {
 
         for (UmlClass c : result.classes()) {
             sb.append(keyword(c.kind())).append(' ').append(c.name());
+            if ("record".equals(c.kind())) {
+                sb.append(" <<record>>");
+            }
             for (String stereotype : stereotypes.getOrDefault(c.name(), List.of())) {
                 sb.append(" <<").append(stereotype).append(">>");
             }
@@ -118,6 +121,7 @@ public class PlantUmlGenerator {
             case "enum" -> "#FFEDD5 ##EA580C";        // amber
             case "abstract" -> "#EDE9FE ##7C3AED";    // violet
             case "annotation" -> "#FEF9C3 ##CA8A04";  // yellow
+            case "record" -> "#CCFBF1 ##0D9488";      // teal
             default -> "#ECFDF5 ##10B981";            // green (concrete class)
         };
     }
