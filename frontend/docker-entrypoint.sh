@@ -2,27 +2,23 @@
 set -e
 
 # ─────────────────────────────────────────────────────────────
-# Runtime backend URL injection
-# Replace the placeholder baked into the Angular build with the
-# actual BACKEND_URL environment variable set on the container.
+# Runtime API base-URL injection
+# Replaces BACKEND_URL_PLACEHOLDER (baked into the Angular build)
+# with the BACKEND_URL env var.
 #
-# Usage: set BACKEND_URL env var in Railway (or any platform)
-# e.g.  BACKEND_URL=https://my-backend.up.railway.app
+#  • EC2 / docker-compose  → leave BACKEND_URL empty. The app then calls a
+#    same-origin "/api" path which Nginx proxies to the backend container
+#    (see nginx.conf). No CORS, only ports 80/443 exposed.
+#  • Different origin       → set BACKEND_URL to an absolute URL,
+#    e.g. https://api.example.com
 # ─────────────────────────────────────────────────────────────
 
 PLACEHOLDER="BACKEND_URL_PLACEHOLDER"
 TARGET_DIR="/usr/share/nginx/html"
+URL="${BACKEND_URL:-}"
 
-if [ -z "$BACKEND_URL" ]; then
-  echo "⚠️  WARNING: BACKEND_URL is not set. API calls will fail."
-  echo "   Set BACKEND_URL to your backend service URL (e.g. https://xxx.up.railway.app)"
-else
-  echo "🔧 Injecting BACKEND_URL: $BACKEND_URL"
-  # Replace placeholder in all compiled JS files
-  find "$TARGET_DIR" -name "*.js" -exec \
-    sed -i "s|${PLACEHOLDER}|${BACKEND_URL}|g" {} +
-  echo "✅ BACKEND_URL injected successfully"
-fi
+echo "🔧 API base URL = '${URL}' (empty = relative /api via the Nginx proxy)"
+find "$TARGET_DIR" -name "*.js" -exec sed -i "s|${PLACEHOLDER}|${URL}|g" {} +
 
 # Hand off to the default Nginx entrypoint
 exec /docker-entrypoint.sh "$@"

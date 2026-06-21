@@ -1,0 +1,50 @@
+# ──────────────────────────────────────────────────────────────
+# Production compose for the EC2 host.
+# Pulls prebuilt images from Docker Hub (built & pushed by GitHub Actions) —
+# nothing is compiled on the 1 GB box. Used by the one-time setup script and
+# by the CI/CD deploy job (.github/workflows/docker-publish.yml).
+#
+# Requires a .env file next to this one:  DOCKER_USERNAME=<your-dockerhub-user>
+# ──────────────────────────────────────────────────────────────
+services:
+  backend:
+    image: ${DOCKER_USERNAME}/code-to-uml-backend:latest
+    container_name: code-to-uml-backend
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+      - SERVER_PORT=8080
+      # Keep the JVM small so it fits the ~1 GB instance (heap ≈ 50% of mem_limit)
+      - JAVA_TOOL_OPTIONS=-XX:MaxRAMPercentage=50 -XX:+UseSerialGC -XX:+ExitOnOutOfMemoryError
+    expose:
+      - "8080"            # internal only — reached via the Nginx /api proxy
+    networks: [app-network]
+    restart: unless-stopped
+    mem_limit: 600m
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8080/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  frontend:
+    image: ${DOCKER_USERNAME}/code-to-uml-frontend:latest
+    container_name: code-to-uml-frontend
+    environment:
+      - BACKEND_URL=        # empty → app uses relative /api (proxied to backend)
+      - DOMAIN=codetouml.in
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /etc/letsencrypt:/etc/letsencrypt:ro     # TLS certs (issued on the host)
+      - /var/www/certbot:/var/www/certbot:ro     # ACME challenge webroot
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks: [app-network]
+    restart: unless-stopped
+
+networks:
+  app-network:
+    driver: bridge

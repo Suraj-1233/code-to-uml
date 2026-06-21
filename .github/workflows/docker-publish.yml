@@ -155,3 +155,40 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Triggered by:** \`${{ github.event_name }}\` on \`${{ github.ref_name }}\`" >> $GITHUB_STEP_SUMMARY
           echo "**Commit SHA:** \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+
+  # ────────────────────────────────────────────
+  # Job 4 — Deploy to EC2 (pull new images & restart)
+  # ────────────────────────────────────────────
+  deploy:
+    name: 🚀 Deploy to EC2
+    runs-on: ubuntu-latest
+    needs: [build-backend, build-frontend]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    steps:
+      - name: ⬇️ Checkout repository
+        uses: actions/checkout@v4
+
+      # Keep the server's compose file in sync with the repo
+      - name: 📤 Copy compose file to EC2
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          source: docker-compose.prod.yml
+          target: /opt/code-to-uml
+
+      - name: 🚀 Pull images & restart on EC2
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            set -e
+            cd /opt/code-to-uml
+            echo "DOCKER_USERNAME=${{ secrets.DOCKER_USERNAME }}" > .env
+            docker compose -f docker-compose.prod.yml pull
+            docker compose -f docker-compose.prod.yml up -d
+            docker image prune -f

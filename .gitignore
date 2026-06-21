@@ -9,3 +9,10 @@ frontend/.angular/
 # OS / editor
 .DS_Store
 *.log
+
+# Secrets / keys — never commit SSH private keys or env files
+*.pem
+*.key
+.env
+.env.*
+!.env.example
