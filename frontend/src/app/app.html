@@ -7,9 +7,19 @@
         <p class="tagline">Paste Java, get a class diagram</p>
       </div>
     </div>
-    <a class="repo-link" href="https://plantuml.com/class-diagram" target="_blank" rel="noopener">
-      Powered by JavaParser + PlantUML
-    </a>
+    <div class="topbar-right">
+      @if (auth.user(); as u) {
+        <button class="btn ghost" (click)="toggleHistory()">My diagrams</button>
+        <span class="user-chip" [title]="u.email">
+          @if (u.picture) {
+            <img [src]="u.picture" alt="" referrerpolicy="no-referrer" />
+          }
+          <span class="user-name">{{ u.name }}</span>
+        </span>
+        <button class="btn ghost" (click)="signOut()">Sign out</button>
+      }
+      <div #googleBtn class="gbtn" [class.hidden]="!!auth.user()"></div>
+    </div>
   </header>
 
   <main class="panes">
@@ -17,9 +27,20 @@
     <section class="pane editor-pane">
       <div class="pane-head">
         <span class="pane-title">Java source</span>
-        <button class="btn primary" (click)="generate()" [disabled]="loading()">
-          {{ loading() ? 'Generating…' : 'Generate UML ▸' }}
-        </button>
+        <div class="actions">
+          <button class="btn ghost" (click)="clear()" [disabled]="loading() || !code()">Clear</button>
+          <button class="btn primary" (click)="generate()" [disabled]="loading()">
+            {{ loading() ? 'Generating…' : 'Generate UML ▸' }}
+          </button>
+        </div>
+      </div>
+      <div class="repo-bar">
+        <input class="repo-input" type="text" [value]="repoUrl()"
+               (input)="repoUrl.set($any($event.target).value)"
+               (keyup.enter)="generateRepo()"
+               [disabled]="loading()"
+               placeholder="…or a public GitHub repo: github.com/owner/repo" />
+        <button class="btn" (click)="generateRepo()" [disabled]="loading() || !repoUrl()">Diagram repo ▸</button>
       </div>
       <app-code-editor
         [value]="code()"
@@ -32,6 +53,9 @@
         <span class="pane-title">Class diagram</span>
         @if (rawSvg()) {
           <div class="actions">
+            @if (auth.user()) {
+              <button class="btn ghost" (click)="save()" [disabled]="!canSave()">{{ saved() ? 'Saved ✓' : '★ Save' }}</button>
+            }
             <button class="btn ghost" (click)="copyPuml()">{{ copied() ? 'Copied ✓' : 'Copy PlantUML' }}</button>
             <button class="btn ghost" (click)="downloadPuml()">.puml</button>
             <button class="btn ghost" (click)="downloadSvg()">.svg</button>
@@ -91,4 +115,30 @@
       }
     </section>
   </main>
+
+  @if (showHistory()) {
+    <div class="history-overlay" (click)="showHistory.set(false)">
+      <div class="history-panel" (click)="$event.stopPropagation()">
+        <div class="history-head">
+          <span>My diagrams</span>
+          <button class="btn ghost" (click)="showHistory.set(false)">✕</button>
+        </div>
+        @if (history().length === 0) {
+          <p class="history-empty">No saved diagrams yet. Generate one, then click <strong>★ Save</strong>.</p>
+        } @else {
+          <ul class="history-list">
+            @for (d of history(); track d.id) {
+              <li (click)="openSaved(d)">
+                <div class="h-info">
+                  <div class="h-title">{{ d.title }}</div>
+                  <div class="h-meta">{{ d.sourceType === 'repo' ? '📦 repo' : '📄 code' }} · {{ d.createdAt | date:'medium' }}</div>
+                </div>
+                <button class="h-del" (click)="deleteSaved(d, $event)" title="Delete">🗑</button>
+              </li>
+            }
+          </ul>
+        }
+      </div>
+    </div>
+  }
 </div>

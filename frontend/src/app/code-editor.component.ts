@@ -3,6 +3,7 @@ import {
   Component,
   ElementRef,
   OnDestroy,
+  effect,
   input,
   output,
   signal,
@@ -44,6 +45,17 @@ export class CodeEditorComponent implements AfterViewInit, OnDestroy {
   readonly useFallback = signal(false);
 
   private editor: any;
+
+  constructor() {
+    // Sync the editor when `value` changes from outside (Clear, or loading a saved diagram).
+    // The guard makes typing a no-op here (editor already holds the value), avoiding a loop.
+    effect(() => {
+      const next = this.value();
+      if (this.editor && this.editor.getValue() !== next) {
+        this.editor.setValue(next);
+      }
+    });
+  }
 
   ngAfterViewInit(): void {
     loadMonaco()

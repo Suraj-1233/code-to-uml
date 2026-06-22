@@ -51,65 +51,88 @@ public class JavaCodeParser {
         this.patternDetector = patternDetector;
     }
 
+    /** Parses a single pasted snippet (strict — surfaces parse errors to the user). */
     public ParseResult parse(String code) {
-        // Java 17 (LTS) language level so modern syntax (records, sealed types, text blocks,
-        // instanceof patterns, …) parses instead of failing the whole file.
-        JavaParser javaParser = new JavaParser(new ParserConfiguration()
-                .setLanguageLevel(ParserConfiguration.LanguageLevel.JAVA_17));
-        com.github.javaparser.ParseResult<CompilationUnit> parsed = javaParser.parse(code);
+        com.github.javaparser.ParseResult<CompilationUnit> parsed = newParser().parse(code);
         CompilationUnit cu = parsed.getResult()
                 .orElseThrow(() -> new ParseProblemException(parsed.getProblems()));
+        return analyze(List.of(cu));
+    }
 
+    /** Parses many Java sources together (e.g. a whole repo), skipping files that don't parse. */
+    public ParseResult parseRepo(List<String> sources) {
+        JavaParser parser = newParser();
+        List<CompilationUnit> cus = new ArrayList<>();
+        for (String src : sources) {
+            try {
+                parser.parse(src).getResult().ifPresent(cus::add);
+            } catch (Exception ignored) {
+                // skip a file that fails to parse rather than failing the whole repo
+            }
+        }
+        return analyze(cus);
+    }
+
+    private JavaParser newParser() {
+        // Java 17 (LTS) language level so modern syntax (records, sealed types, text blocks, …) parses.
+        return new JavaParser(new ParserConfiguration()
+                .setLanguageLevel(ParserConfiguration.LanguageLevel.JAVA_17));
+    }
+
+    /** Builds the model + relations + patterns over one or more parsed compilation units. */
+    private ParseResult analyze(List<CompilationUnit> cus) {
         List<UmlClass> classes = new ArrayList<>();
 
-        // Classes, abstract classes and interfaces (includes nested types).
-        for (ClassOrInterfaceDeclaration decl : cu.findAll(ClassOrInterfaceDeclaration.class)) {
-            String kind = decl.isInterface()
-                    ? "interface"
-                    : (has(decl.getModifiers(), Modifier.Keyword.ABSTRACT) ? "abstract" : "class");
-            boolean isInterface = decl.isInterface();
-            classes.add(new UmlClass(
-                    decl.getNameAsString(),
-                    kind,
-                    fieldsOf(decl.getFields(), isInterface),
-                    methodsOf(decl.getMethods(), isInterface),
-                    names(decl.getExtendedTypes()),
-                    names(decl.getImplementedTypes())
-            ));
-        }
-
-        // Enums.
-        for (EnumDeclaration decl : cu.findAll(EnumDeclaration.class)) {
-            List<UmlField> fields = new ArrayList<>();
-            for (EnumConstantDeclaration constant : decl.getEntries()) {
-                fields.add(new UmlField("+", constant.getNameAsString(), "", true));
+        for (CompilationUnit cu : cus) {
+            // Classes, abstract classes and interfaces (includes nested types).
+            for (ClassOrInterfaceDeclaration decl : cu.findAll(ClassOrInterfaceDeclaration.class)) {
+                String kind = decl.isInterface()
+                        ? "interface"
+                        : (has(decl.getModifiers(), Modifier.Keyword.ABSTRACT) ? "abstract" : "class");
+                boolean isInterface = decl.isInterface();
+                classes.add(new UmlClass(
+                        decl.getNameAsString(),
+                        kind,
+                        fieldsOf(decl.getFields(), isInterface),
+                        methodsOf(decl.getMethods(), isInterface),
+                        names(decl.getExtendedTypes()),
+                        names(decl.getImplementedTypes())
+                ));
             }
-            fields.addAll(fieldsOf(decl.getFields(), false));
-            classes.add(new UmlClass(
-                    decl.getNameAsString(),
-                    "enum",
-                    fields,
-                    methodsOf(decl.getMethods(), false),
-                    new ArrayList<>(),
-                    names(decl.getImplementedTypes())
-            ));
-        }
 
-        // Records (Java 16+). The header components are the canonical fields.
-        for (RecordDeclaration decl : cu.findAll(RecordDeclaration.class)) {
-            List<UmlField> fields = new ArrayList<>();
-            for (Parameter component : decl.getParameters()) {
-                fields.add(new UmlField("+", component.getNameAsString(), component.getType().asString(), false));
+            // Enums.
+            for (EnumDeclaration decl : cu.findAll(EnumDeclaration.class)) {
+                List<UmlField> fields = new ArrayList<>();
+                for (EnumConstantDeclaration constant : decl.getEntries()) {
+                    fields.add(new UmlField("+", constant.getNameAsString(), "", true));
+                }
+                fields.addAll(fieldsOf(decl.getFields(), false));
+                classes.add(new UmlClass(
+                        decl.getNameAsString(),
+                        "enum",
+                        fields,
+                        methodsOf(decl.getMethods(), false),
+                        new ArrayList<>(),
+                        names(decl.getImplementedTypes())
+                ));
             }
-            fields.addAll(fieldsOf(decl.getFields(), false));
-            classes.add(new UmlClass(
-                    decl.getNameAsString(),
-                    "record",
-                    fields,
-                    methodsOf(decl.getMethods(), false),
-                    new ArrayList<>(),
-                    names(decl.getImplementedTypes())
-            ));
+
+            // Records (Java 16+). The header components are the canonical fields.
+            for (RecordDeclaration decl : cu.findAll(RecordDeclaration.class)) {
+                List<UmlField> fields = new ArrayList<>();
+                for (Parameter component : decl.getParameters()) {
+                    fields.add(new UmlField("+", component.getNameAsString(), component.getType().asString(), false));
+                }
+                fields.addAll(fieldsOf(decl.getFields(), false));
+                classes.add(new UmlClass(
+                        decl.getNameAsString(),
+                        "record",
+                        fields,
+                        methodsOf(decl.getMethods(), false),
+                        new ArrayList<>(),
+                        names(decl.getImplementedTypes())
+                ));
+            }
         }
 
         Set<String> known = new HashSet<>();
@@ -117,8 +140,8 @@ public class JavaCodeParser {
             known.add(c.name());
         }
 
-        List<DetectedPattern> patterns = patternDetector.detect(cu, classes);
-        return new ParseResult(classes, buildRelations(cu, known), patterns);
+        List<DetectedPattern> patterns = patternDetector.detect(cus, classes);
+        return new ParseResult(classes, buildRelations(cus, known), patterns);
     }
 
     private List<UmlField> fieldsOf(List<FieldDeclaration> declarations, boolean ownerIsInterface) {
@@ -157,9 +180,10 @@ public class JavaCodeParser {
      * single strongest relationship, ranked: inheritance/realization &gt; composition &gt;
      * aggregation &gt; association &gt; dependency.
      */
-    private List<UmlRelation> buildRelations(CompilationUnit cu, Set<String> known) {
+    private List<UmlRelation> buildRelations(List<CompilationUnit> cus, Set<String> known) {
         List<RelCandidate> candidates = new ArrayList<>();
 
+        for (CompilationUnit cu : cus) {
         for (ClassOrInterfaceDeclaration decl : cu.findAll(ClassOrInterfaceDeclaration.class)) {
             String owner = decl.getNameAsString();
 
@@ -258,6 +282,7 @@ public class JavaCodeParser {
                 }
             }
         }
+        } // end for (cu : cus)
 
         // Keep the strongest candidate per ordered (from -> to) pair.
         Map<String, RelCandidate> best = new LinkedHashMap<>();

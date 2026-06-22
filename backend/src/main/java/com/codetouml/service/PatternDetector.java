@@ -47,8 +47,11 @@ public class PatternDetector {
             "Map", "HashMap", "TreeMap", "LinkedHashMap", "ConcurrentHashMap", "Hashtable", "WeakHashMap"
     );
 
-    public List<DetectedPattern> detect(CompilationUnit cu, List<UmlClass> classes) {
-        List<ClassOrInterfaceDeclaration> types = cu.findAll(ClassOrInterfaceDeclaration.class);
+    public List<DetectedPattern> detect(List<CompilationUnit> cus, List<UmlClass> classes) {
+        List<ClassOrInterfaceDeclaration> types = new ArrayList<>();
+        for (CompilationUnit cu : cus) {
+            types.addAll(cu.findAll(ClassOrInterfaceDeclaration.class));
+        }
 
         Set<String> known = new HashSet<>();
         Map<String, ClassOrInterfaceDeclaration> byName = new HashMap<>();

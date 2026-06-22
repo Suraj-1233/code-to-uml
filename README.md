@@ -8,6 +8,8 @@ can download as SVG or as PlantUML text.
   emits **PlantUML**, and renders it to SVG in-process.
 - **Frontend:** Angular 21 (standalone components + signals) — a **Monaco** (VS Code) editor
   on the left with Java syntax highlighting, and a **pan/zoom** diagram viewer on the right.
+  Every box is coloured by element kind (class / interface / enum / abstract / record) and every
+  edge by relationship type, so even a big diagram reads at a glance.
 
 The diagram is rendered with PlantUML's pure-Java **Smetana** layout engine, so **Graphviz
 is *not* required** — everything runs inside the JVM.
@@ -36,7 +38,8 @@ is *not* required** — everything runs inside the JVM.
 
 What it extracts:
 
-- Classes, abstract classes, interfaces and enums (including nested types)
+- Classes, abstract classes, interfaces, enums and **records** (including nested types). Source is
+  parsed at the Java 17 language level, so records, sealed types, text blocks, etc. don't break parsing.
 - Fields and methods with visibility (`+ - # ~`), `{static}` and `{abstract}` markers
 - The full set of UML relationships, classified from the code:
   - `extends` → **inheritance**, `implements` → **realization**

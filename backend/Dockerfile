@@ -24,6 +24,10 @@ FROM eclipse-temurin:21-jre-alpine AS runtime
 LABEL maintainer="codetouml"
 LABEL description="code-to-uml Spring Boot backend"
 
+# Graphviz powers PlantUML's "dot" layout (UML_LAYOUT=dot) — far more robust than the
+# pure-Java Smetana engine for large repo diagrams.
+RUN apk add --no-cache graphviz ttf-dejavu
+
 # Create a non-root user for security
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup
 
@@ -34,6 +38,9 @@ COPY --from=builder /app/target/*.jar app.jar
 
 # Give ownership to non-root user
 RUN chown appuser:appgroup app.jar
+
+# Writable dir for the H2 saved-diagram DB (a named volume mounts here in prod)
+RUN mkdir -p /data && chown appuser:appgroup /data
 
 USER appuser
 

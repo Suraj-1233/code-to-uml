@@ -15,8 +15,14 @@ services:
       - SERVER_PORT=8080
       # Keep the JVM small so it fits the ~1 GB instance (heap ≈ 50% of mem_limit)
       - JAVA_TOOL_OPTIONS=-XX:MaxRAMPercentage=50 -XX:+UseSerialGC -XX:+ExitOnOutOfMemoryError
+      # Graphviz is in the image → use the robust "dot" layout for big repo diagrams
+      - UML_LAYOUT=dot
+      # Saved-diagram DB lives on a mounted volume so history survives redeploys
+      - DB_PATH=/data/diagrams
     expose:
       - "8080"            # internal only — reached via the Nginx /api proxy
+    volumes:
+      - diagram-data:/data   # named volume → survives redeploys, no host-uid permission issues
     networks: [app-network]
     restart: unless-stopped
     mem_limit: 600m
@@ -48,3 +54,6 @@ services:
 networks:
   app-network:
     driver: bridge
+
+volumes:
+  diagram-data:    # persists saved-diagram history across redeploys

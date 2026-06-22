@@ -6,6 +6,7 @@ import com.codetouml.model.UmlClass;
 import com.codetouml.model.UmlField;
 import com.codetouml.model.UmlMethod;
 import com.codetouml.model.UmlRelation;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -17,11 +18,23 @@ import java.util.Map;
 @Service
 public class PlantUmlGenerator {
 
+    /**
+     * Layout engine: "smetana" (pure-Java, no Graphviz — fine for small diagrams) or "dot"
+     * (Graphviz, far more robust for large repo diagrams; the prod image ships Graphviz).
+     */
+    private final String layout;
+
+    public PlantUmlGenerator(@Value("${uml.layout:smetana}") String layout) {
+        this.layout = layout;
+    }
+
     public String generate(ParseResult result) {
         StringBuilder sb = new StringBuilder();
         sb.append("@startuml\n");
-        // Smetana = pure-Java layout, so no Graphviz/dot binary is required.
-        sb.append("!pragma layout smetana\n");
+        if (!"dot".equalsIgnoreCase(layout)) {
+            // Pure-Java layout (no Graphviz needed). With uml.layout=dot, PlantUML uses Graphviz instead.
+            sb.append("!pragma layout smetana\n");
+        }
         sb.append("skinparam dpi 96\n");
         sb.append("skinparam backgroundColor #FAFBFC\n");
         sb.append("skinparam shadowing false\n");
