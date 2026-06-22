@@ -3,12 +3,8 @@ package com.codetouml.service;
 import com.codetouml.dto.DiagramDetail;
 import com.codetouml.dto.DiagramSummary;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.jdbc.support.GeneratedKeyHolder;
-import org.springframework.jdbc.support.KeyHolder;
 import org.springframework.stereotype.Repository;
 
-import java.sql.PreparedStatement;
-import java.sql.Statement;
 import java.util.List;
 
 /** Stores and retrieves saved diagrams, scoped to the owning user. */
@@ -21,20 +17,12 @@ public class DiagramStore {
         this.jdbc = jdbc;
     }
 
-    public long save(String userSub, String email, String title, String sourceType, String source) {
-        KeyHolder kh = new GeneratedKeyHolder();
-        jdbc.update(con -> {
-            PreparedStatement ps = con.prepareStatement(
-                    "INSERT INTO diagrams(user_sub, user_email, title, source_type, source) VALUES (?,?,?,?,?)",
-                    Statement.RETURN_GENERATED_KEYS);
-            ps.setString(1, userSub);
-            ps.setString(2, email);
-            ps.setString(3, title);
-            ps.setString(4, sourceType);
-            ps.setString(5, source);
-            return ps;
-        }, kh);
-        return kh.getKey().longValue();
+    public void save(String userSub, String email, String title, String sourceType, String source) {
+        // Plain insert — no generated-key fetch (H2's getGeneratedKeys returns the whole row, which
+        // makes KeyHolder.getKey() throw even though the row inserts fine). The client doesn't need the id.
+        jdbc.update(
+                "INSERT INTO diagrams(user_sub, user_email, title, source_type, source) VALUES (?,?,?,?,?)",
+                userSub, email, title, sourceType, source);
     }
 
     public List<DiagramSummary> listFor(String userSub) {

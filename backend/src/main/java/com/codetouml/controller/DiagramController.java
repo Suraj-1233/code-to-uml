@@ -51,8 +51,8 @@ public class DiagramController {
         if (title.length() > 200) {
             title = title.substring(0, 200);
         }
-        long id = store.save(user.sub(), user.email(), title, req.sourceType(), req.source());
-        return ResponseEntity.ok(Map.of("id", id));
+        store.save(user.sub(), user.email(), title, req.sourceType(), req.source());
+        return ResponseEntity.ok(Map.of("saved", true));
     }
 
     @GetMapping
