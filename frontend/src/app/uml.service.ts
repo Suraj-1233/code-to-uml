@@ -68,4 +68,9 @@ export class UmlService {
   deleteDiagram(id: number): Observable<void> {
     return this.http.delete<void>(`${this.baseUrl}/api/diagrams/${id}`, { headers: this.auth.authHeader() });
   }
+
+  /** Public sign-up count (no auth) for the "N developers" badge. */
+  getStats(): Observable<{ users: number }> {
+    return this.http.get<{ users: number }>(`${this.baseUrl}/api/stats`);
+  }
 }

@@ -1,6 +1,7 @@
 # Backend (Maven / Spring Boot)
 backend/target/
-backend/data/          # local H2 saved-diagram DB (runtime artifact, not source)
+# local H2 saved-diagram DB (runtime artifact, not source)
+backend/data/
 
 # Frontend (Angular) — node_modules & dist are ignored by frontend/.gitignore too
 frontend/node_modules/

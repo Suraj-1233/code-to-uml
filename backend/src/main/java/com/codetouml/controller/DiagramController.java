@@ -5,6 +5,7 @@ import com.codetouml.dto.DiagramSummary;
 import com.codetouml.dto.SaveDiagramRequest;
 import com.codetouml.service.DiagramStore;
 import com.codetouml.service.GoogleAuthService;
+import com.codetouml.service.UserStore;
 import com.codetouml.service.GoogleAuthService.GoogleUser;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -33,16 +34,19 @@ public class DiagramController {
 
     private final GoogleAuthService auth;
     private final DiagramStore store;
+    private final UserStore users;
 
-    public DiagramController(GoogleAuthService auth, DiagramStore store) {
+    public DiagramController(GoogleAuthService auth, DiagramStore store, UserStore users) {
         this.auth = auth;
         this.store = store;
+        this.users = users;
     }
 
     @PostMapping
     public ResponseEntity<?> save(@RequestHeader(value = "Authorization", required = false) String authz,
                                   @RequestBody SaveDiagramRequest req) {
         GoogleUser user = auth.requireUser(authz);
+        users.record(user.sub(), user.email(), user.name());
         if (req == null || req.source() == null || req.source().isBlank()
                 || req.sourceType() == null || !SOURCE_TYPES.contains(req.sourceType())) {
             return ResponseEntity.badRequest().body(Map.of("error", "Nothing valid to save."));
@@ -57,7 +61,10 @@ public class DiagramController {
 
     @GetMapping
     public List<DiagramSummary> list(@RequestHeader(value = "Authorization", required = false) String authz) {
-        return store.listFor(auth.requireUser(authz).sub());
+        GoogleUser user = auth.requireUser(authz);
+        // The frontend lists diagrams right after sign-in, so this is where we capture a sign-up.
+        users.record(user.sub(), user.email(), user.name());
+        return store.listFor(user.sub());
     }
 
     @GetMapping("/{id}")

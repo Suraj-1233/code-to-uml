@@ -1,4 +1,4 @@
-import { AfterViewInit, Component, ElementRef, inject, signal, viewChild } from '@angular/core';
+import { AfterViewInit, Component, ElementRef, effect, inject, signal, viewChild } from '@angular/core';
 import { DatePipe } from '@angular/common';
 import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
 import { Observable } from 'rxjs';
@@ -62,12 +62,31 @@ export class App implements AfterViewInit {
   readonly history = signal<DiagramSummary[]>([]);
   readonly showHistory = signal<boolean>(false);
   readonly saved = signal<boolean>(false);
+  readonly signupCount = signal<number | null>(null);
+
+  constructor() {
+    // On sign-in (or a restored session) the list call upserts the user server-side,
+    // which is how we count sign-ups; it also pre-loads history + refreshes the count.
+    effect(() => {
+      if (this.auth.user()) {
+        this.refreshHistory();
+      }
+    });
+  }
 
   ngAfterViewInit(): void {
+    this.refreshStats();
     const el = this.googleBtn()?.nativeElement;
     if (el) {
       this.auth.renderButton(el).catch(() => { /* GIS unavailable — sign-in just won't show */ });
     }
+  }
+
+  private refreshStats(): void {
+    this.uml.getStats().subscribe({
+      next: (s) => this.signupCount.set(s.users),
+      error: () => { /* non-critical — just don't show the badge */ },
+    });
   }
 
   generate(): void {
@@ -152,7 +171,10 @@ export class App implements AfterViewInit {
 
   private refreshHistory(): void {
     this.uml.listDiagrams().subscribe({
-      next: (rows) => this.history.set(rows),
+      next: (rows) => {
+        this.history.set(rows);
+        this.refreshStats();   // the list call just recorded this user — reflect it in the count
+      },
       error: (err) => this.handleAuthError(err, 'Could not load your saved diagrams.'),
     });
   }

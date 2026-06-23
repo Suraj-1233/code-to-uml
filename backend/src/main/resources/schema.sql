@@ -9,3 +9,11 @@ CREATE TABLE IF NOT EXISTS diagrams (
   created_at  TIMESTAMP    DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_diagrams_user ON diagrams(user_sub);
+
+-- One row per signed-in user (recorded on sign-in) — powers the public sign-up count.
+CREATE TABLE IF NOT EXISTS users (
+  user_sub   VARCHAR(64)  PRIMARY KEY,
+  email      VARCHAR(256),
+  name       VARCHAR(256),
+  first_seen TIMESTAMP    DEFAULT CURRENT_TIMESTAMP
+);

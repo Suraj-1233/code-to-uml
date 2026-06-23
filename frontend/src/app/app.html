@@ -8,6 +8,9 @@
       </div>
     </div>
     <div class="topbar-right">
+      @if (signupCount() !== null) {
+        <span class="signup-count" title="Developers signed up">👥 {{ signupCount() }}</span>
+      }
       @if (auth.user(); as u) {
         <button class="btn ghost" (click)="toggleHistory()">My diagrams</button>
         <span class="user-chip" [title]="u.email">
